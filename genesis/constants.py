@@ -24,6 +24,7 @@ class GEOM_TYPE(IntEnum):
     BOX = 5
     MESH = 6
     TERRAIN = 7
+    ELLIPTIC_CYLINDER = 8
 
 
 # joint type in rigid solver, ranked by number of dofs

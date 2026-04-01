@@ -416,7 +416,9 @@ class Scene(RBC):
                 material.sdf_max_res = 32
 
         # some morph should not smooth surface normal
-        if isinstance(morph_for_checks, (gs.morphs.Box, gs.morphs.Cylinder, gs.morphs.Terrain)):
+        if isinstance(
+            morph_for_checks, (gs.morphs.Box, gs.morphs.Cylinder, gs.morphs.EllipticCylinder, gs.morphs.Terrain)
+        ):
             surface.smooth = False
 
         if isinstance(morph_for_checks, (gs.morphs.URDF, gs.morphs.MJCF, gs.morphs.USD, gs.morphs.Terrain)):

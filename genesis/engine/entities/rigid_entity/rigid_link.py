@@ -55,6 +55,13 @@ def get_local_inertial_from_geom(geom: RigidGeom | RigidVisGeom, rho: float) -> 
         I_r = (geom_mass / 12.0) * (3.0 * radius**2 + height**2)
         I_z = 0.5 * geom_mass * radius**2
         geom_inertia_local = np.diag([I_r, I_r, I_z])
+    elif geom_type == gs.GEOM_TYPE.ELLIPTIC_CYLINDER:
+        a, b, height = geom.data[:3]  # semi-axes a,b and height along z
+        geom_mass = np.pi * a * b * height * rho  # volume = π*a*b*h
+        I_x = (geom_mass / 12.0) * (height**2 + b**2)
+        I_y = (geom_mass / 12.0) * (height**2 + a**2)
+        I_z = 0.5 * geom_mass * (a**2 + b**2)
+        geom_inertia_local = np.diag([I_x, I_y, I_z])
     elif geom_type == gs.GEOM_TYPE.CAPSULE:
         radius, height = geom.data[:2]
         m_cyl = np.pi * radius**2 * height * rho

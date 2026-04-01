@@ -307,6 +307,12 @@ class KinematicEntity(Entity):
             geom_data = np.array([morph.radius])
             geom_type = gs.GEOM_TYPE.SPHERE
             link_name_prefix = "sphere"
+        elif isinstance(morph, gs.options.morphs.EllipticCylinder):
+            tmesh = mu.create_elliptical_cylinder(a=morph.semi_axis[0], b=morph.semi_axis[1], height=morph.height)
+            cmesh = tmesh
+            geom_data = np.array([morph.semi_axis[0], morph.semim_axis[1], morph.height])
+            geom_type = gs.GEOM_TYPE.ELLIPTIC_CYLINDER
+            link_name_prefix = "elliptic_cylinder"
         elif isinstance(morph, gs.options.morphs.Cylinder):
             tmesh = mu.create_cylinder(radius=morph.radius, height=morph.height)
             cmesh = tmesh
@@ -1740,6 +1746,8 @@ class KinematicEntity(Entity):
             return "box"
         if isinstance(morph, gs.morphs.Sphere):
             return "sphere"
+        if isinstance(morph, gs.morphs.EllipticCylinder):
+            return "elliptic_cylinder"
         if isinstance(morph, gs.morphs.Cylinder):
             return "cylinder"
         if isinstance(morph, gs.morphs.Plane):

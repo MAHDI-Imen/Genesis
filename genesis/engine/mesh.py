@@ -390,6 +390,8 @@ class Mesh(RBC):
             tmesh = mu.create_box(extents=morph.size)
         elif isinstance(morph, gs.options.morphs.Cylinder):
             tmesh = mu.create_cylinder(radius=morph.radius, height=morph.height)
+        elif isinstance(morph, gs.options.morphs.EllipticCylinder):
+            tmesh = mu.create_elliptical_cylinder(a=morph.semi_axis[0], b=morph.semi_axis[1], height=morph.height)
         elif isinstance(morph, gs.options.morphs.Sphere):
             tmesh = mu.create_sphere(radius=morph.radius)
         else:

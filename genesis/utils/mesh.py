@@ -797,6 +797,30 @@ def create_cylinder(radius, height, sections=None, color=(1.0, 1.0, 1.0, 1.0)):
 
 
 @lru_cache(maxsize=32)
+def _create_unit_elliptic_cylinder_impl(a, b, height, sections):
+    mesh = trimesh.creation.cylinder(radius=1.0, height=height, sections=sections)
+    scale_matrix = np.eye(4)
+    scale_matrix[0, 0] = a
+    scale_matrix[1, 1] = b
+    mesh.apply_transform(scale_matrix)
+    vertices, faces = mesh.vertices.copy(), mesh.faces.copy()
+    attrs = {"vertex_normals": mesh.vertex_normals.copy(), "face_normals": mesh.face_normals.copy()}
+    for data in (vertices, faces, *attrs.values()):
+        data.flags.writeable = False
+    return vertices, faces, attrs
+
+
+def create_elliptical_cylinder(a, b, height, sections=None, color=(1.0, 1.0, 1.0, 1.0)):
+    vertices, faces, attrs = _create_unit_elliptic_cylinder_impl(a, b, height, sections=sections)
+    visual = trimesh.visual.ColorVisuals()
+    visual._data["vertex_colors"] = np.tile(color_f32_to_u8(color), (len(vertices), 1))
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces, visual=visual, process=False)
+    mesh._cache.id_set()
+    mesh._cache.cache.update(attrs)
+    return mesh
+
+
+@lru_cache(maxsize=32)
 def _create_unit_cone_impl(sections):
     mesh = trimesh.creation.cone(radius=1.0, height=1.0, sections=sections)
     vertices, faces = mesh.vertices.copy(), mesh.faces.copy()

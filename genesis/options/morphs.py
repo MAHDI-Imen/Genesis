@@ -345,6 +345,73 @@ class Cylinder(Primitive, TetGenMixin):
     radius: PositiveFloat = 0.5
 
 
+class EllipticCylinder(Primitive, TetGenMixin):
+    """
+    Morph defined by an elliptic cylinder shape.
+
+    Parameters
+    ----------
+    pos : tuple, shape (3,), optional
+        The position of the entity in meters. Defaults to (0.0, 0.0, 0.0).
+    euler : tuple, shape (3,), optional
+        The euler angle of the entity in degrees. This follows scipy's extrinsic x-y-z rotation convention.
+        Defaults to (0.0, 0.0, 0.0).
+    quat : tuple, shape (4,), optional
+        The quaternion (w-x-y-z convention) of the entity. If specified, `euler` will be ignored. Defaults to None.
+    height : float, optional
+        The height of the cylinder in meters. Defaults to 1.0.
+    axis : float, optional
+        The radius of the cylinder in meters along the two axis. Defaults to (0.5, 0.1).
+    visualization : bool, optional
+        Whether the entity needs to be visualized. Set it to False if you need a invisible object only for collision
+        purposes. Defaults to True. `visualization` and `collision` cannot both be False.
+        **This is only used for RigidEntity.**
+    collision : bool, optional
+        Whether the entity needs to be considered for collision checking. Defaults to True.
+        `visualization` and `collision` cannot both be False. **This is only used for RigidEntity.**
+    requires_jac_and_IK : bool, optional
+        Whether this morph, if created as `RigidEntity`, requires jacobian and inverse kinematics. Defaults to False.
+        **This is only used for RigidEntity.**
+    fixed : bool, optional
+        Whether the primitive should be fixed. Defaults to False. **This is only used for RigidEntity.**
+    batch_fixed_verts : bool, optional
+        Whether to batch fixed vertices. This will allow setting env-specific poses to fixed geometries, at the cost of
+        significantly increasing memory usage. Default to true. **This is only used for RigidEntity.**
+    contype : int, optional
+        The 32-bit integer bitmasks used for contact filtering of contact pairs. When the contype of one geom and the
+        conaffinity of the other geom share a common bit set to 1, two geoms can collide. Defaults to 0xFFFF.
+    conaffinity : int, optional
+        The 32-bit integer bitmasks used for contact filtering of contact pairs. When the conaffinity of one geom and
+        the contype of the other geom share a common bit set to 1, two geoms can collide. Defaults to 0xFFFF.
+    order : int, optional
+        The order of the FEM mesh. Defaults to 1. **This is only used for FEMEntity.**
+    mindihedral : int, optional
+        The minimum dihedral angle in degrees during tetraheralization. Defaults to 10.
+        **This is only used for Volumetric Entity that requires tetraheralization.**
+    minratio : float, optional
+        The minimum tetrahedron quality ratio during tetraheralization. Defaults to 1.1.
+        **This is only used for Volumetric Entity that requires tetraheralization.**
+    nobisect : bool, optional
+        Whether to disable bisection during tetraheralization. Defaults to True.
+        **This is only used for Volumetric Entity that requires tetraheralization.**
+    quality : bool, optional
+        Whether to improve quality during tetraheralization. Defaults to True.
+        **This is only used for Volumetric Entity that requires tetraheralization.**
+    maxvolume : float, optional
+        The maximum tetrahedron volume. Defaults to -1.0 (no limit).
+        **This is only used for Volumetric Entity that requires tetraheralization.**
+    verbose : int, optional
+        The verbosity level during tetraheralization. Defaults to 0.
+        **This is only used for Volumetric Entity that requires tetraheralization.**
+    force_retet : bool, optional
+        Whether to force re-tetraheralization. Defaults to False.
+        **This is only used for Volumetric Entity that requires tetraheralization.**
+    """
+
+    height: float = 1.0
+    semi_axis: tuple = (0.5, 0.1)
+
+
 class Sphere(Primitive, TetGenMixin):
     """
     Morph defined by a sphere shape.
