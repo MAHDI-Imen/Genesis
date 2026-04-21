@@ -31,6 +31,10 @@ def cylinder_to_elements():
     raise NotImplementedError
 
 
+def elliptic_cylinder_to_elements():
+    raise NotImplementedError
+
+
 def mesh_to_elements(file, pos=(0, 0, 0), scale=1.0, tet_cfg=dict()):
     mesh = mu.load_mesh(file)
 

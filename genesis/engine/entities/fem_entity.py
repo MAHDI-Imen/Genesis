@@ -435,6 +435,8 @@ class FEMEntity(Entity):
                 )
             elif isinstance(self.morph, gs.options.morphs.Cylinder):
                 verts, elems = eu.cylinder_to_elements()
+            elif isinstance(self.morph, gs.options.morphs.EllipticCylinder):
+                verts, elems = eu.elliptic_cylinder_to_elements()
             elif isinstance(self.morph, gs.options.morphs.Mesh):
                 # We don't need to proces UVs here because the tetrahedralization process append new vertices
                 # and faces at the end of the vertex list, thus the original UVs are preserved at the beginning.
@@ -1055,6 +1057,8 @@ class FEMEntity(Entity):
             return "fem_box"
         if isinstance(morph, gs.morphs.Sphere):
             return "fem_sphere"
+        if isinstance(morph, gs.morphs.EllipticCylinder):
+            return "fem_elliptic_cylinder"
         if isinstance(morph, gs.morphs.Cylinder):
             return "fem_cylinder"
         if isinstance(morph, gs.morphs.Mesh):

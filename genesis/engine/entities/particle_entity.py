@@ -754,6 +754,8 @@ class ParticleEntity(Entity):
         if isinstance(morph, gs.morphs.Sphere):
             return "sphere"
         if isinstance(morph, gs.morphs.Cylinder):
+            return "elliptic_cylinder"
+        if isinstance(morph, gs.morphs.Cylinder):
             return "cylinder"
         if isinstance(morph, gs.morphs.Mesh):
             return Path(morph.file).stem

@@ -5,7 +5,8 @@ import numpy as np
 
 import genesis as gs
 from genesis.utils.geom import euler_to_quat
-from genesis.vis.keybindings import Key, KeyAction, Keybind
+
+# from genesis.vis.keybindings import Key, KeyAction, Keybind
 
 # Position and angle increments for keyboard teleop control
 KEY_DPOS = 0.1
@@ -54,7 +55,7 @@ def main():
         y = CYLINDER_RING_RADIUS * np.sin(angle)
         scene.add_entity(
             gs.morphs.Cylinder(
-                height=1.5,
+                height=2.0,
                 radius=0.3,
                 pos=(x, y, 0.75),
                 fixed=True,
@@ -74,8 +75,8 @@ def main():
         )
 
     entity_kwargs = dict(
-        pos=(0.0, 0.0, 0.35),
-        quat=(1.0, 0.0, 0.0, 0.0),
+        pos=(0.0, 0.0, 0.01),
+        quat=(0.0, 0.0, 0.0, 0.0),
         fixed=True,
     )
 
@@ -90,11 +91,11 @@ def main():
     else:
         robot = scene.add_entity(
             gs.morphs.URDF(
-                file="urdf/go2/urdf/go2.urdf",
-                **entity_kwargs,
+                file="external/dexmate-urdf/robots/humanoid/vega_1p/vega_1p_gripper.urdf",
+                pos=(0, 0, 0.05),
             )
         )
-        pos_offset = (0.3, 0.0, 0.1)
+        pos_offset = (0.0, 0.0, 2.0)
 
     sensor_kwargs = dict(
         entity_idx=robot.idx,
@@ -112,18 +113,18 @@ def main():
         )
     else:
         if args.pattern == "grid":
-            pattern_cfg = gs.sensors.GridPattern()
+            pattern_cfg = gs.sensors.GridPattern(resolution=0.03, size=(1.5, 1.5))
+
         else:
             if args.pattern != "spherical":
                 gs.logger.warning(f"Unrecognized raycaster pattern: {args.pattern}. Using 'spherical' instead.")
             pattern_cfg = gs.sensors.SphericalPattern()
 
         sensor = scene.add_sensor(gs.sensors.Lidar(pattern=pattern_cfg, **sensor_kwargs))
-
     scene.build(n_envs=args.n_envs)
 
     # Initialize pose state
-    init_pos = np.array([0.0, 0.0, 0.35], dtype=np.float32)
+    init_pos = np.array([0.0, 0.0, 0.05], dtype=np.float32)
     init_euler = np.array([0.0, 0.0, 0.0], dtype=np.float32)
 
     target_pos = init_pos.copy()
