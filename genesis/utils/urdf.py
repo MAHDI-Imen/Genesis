@@ -1,10 +1,11 @@
 import os
 import xml.etree.ElementTree as ET
-from itertools import chain
 from pathlib import Path
 
 import numpy as np
 import trimesh
+
+import xacro
 
 import genesis as gs
 import genesis.utils.gltf as gltf_utils
@@ -26,7 +27,7 @@ def get_robot_name(file_path):
     Parameters
     ----------
     file_path : str or Path
-        Path to the URDF file.
+        Path to the URDF file, or inline URDF XML content.
 
     Returns
     -------
@@ -38,9 +39,11 @@ def get_robot_name(file_path):
     ValueError
         If the robot name attribute is missing or empty.
     """
-    path = os.path.join(get_assets_dir(), file_path)
-    tree = ET.parse(path)
-    root = tree.getroot()
+    try:
+        # Inline XML content parses directly; a file path does not and falls back to reading from disk.
+        root = ET.fromstring(file_path)
+    except ET.ParseError:
+        root = ET.parse(os.path.join(get_assets_dir(), file_path)).getroot()
     if root.tag == "robot":
         name = root.attrib.get("name")
         if name:
@@ -49,8 +52,44 @@ def get_robot_name(file_path):
     raise ValueError(f"Invalid URDF file '{file_path}'. Missing <robot> root element.")
 
 
-def _order_links(l_infos, j_infos, links_g_infos=None):
-    # re-order links based on depth in the kinematic tree, so that parent links are always before child links
+def load_xacro(path, mappings):
+    """Load a XACRO file into a ``urdfpy.URDF`` object with absolute mesh paths.
+
+    Expands all xacro macros, properties, includes, and conditionals in-memory using the ``xacro`` package, then
+    parses the resulting URDF XML into a ``urdfpy.URDF`` object. All relative mesh filenames are resolved to absolute
+    paths so that downstream consumers do not need access to the original source directory.
+
+    Note
+    ----
+    ``$(find package_name)`` substitutions require ROS's ``ament_index_python`` package.
+
+    Parameters
+    ----------
+    path : str
+        Absolute path to the ``.xacro`` or ``.urdf.xacro`` file.
+    mappings : dict
+        Key-value pairs to override ``xacro:arg`` declarations.
+
+    Returns
+    -------
+    urdfpy.URDF
+        The parsed URDF with absolute mesh paths.
+    """
+    doc = xacro.process_file(path, mappings=dict(mappings))
+    node = ET.fromstring(doc.toxml())
+    source_dir = os.path.dirname(path)
+    robot = urdfpy.URDF._from_xml(node, node, source_dir)
+    for link in robot.links:
+        for geom_prop in (*link.collisions, *link.visuals):
+            if isinstance(geom_prop.geometry.geometry, urdfpy.Mesh):
+                geom_prop.geometry.geometry.filename = urdfpy.utils.get_filename(
+                    source_dir, geom_prop.geometry.geometry.filename
+                )
+    return robot
+
+
+def order_links_depth_first(l_infos, j_infos, links_g_infos=None):
+    # Re-order links depth-first so that each subtree occupies a contiguous range and parents precede their children.
     n_links = len(l_infos)
     dict_child = {k: [] for k in range(n_links)}
     for lc in range(n_links):
@@ -60,18 +99,17 @@ def _order_links(l_infos, j_infos, links_g_infos=None):
         if lp != -1:
             dict_child[lp].append(lc)
 
+    # Depth-first pre-order: a parent always precedes its children (required downstream), and each subtree occupies a
+    # contiguous index range, so a free body and all of its descendants get contiguous links and DOFs. Siblings keep
+    # their original relative order, and the result matches MuJoCo's body ordering. Contiguity lets the per-tree
+    # mass-matrix factorization stay block-local instead of spanning the whole (possibly multi-body) entity.
     ordered_links_idx = []
-    n_level = 0
-    stack_topology = [lc for lc in range(n_links) if l_infos[lc]["parent_idx"] == -1]
-    while len(stack_topology) > 0:
-        next_stack = []
-        ordered_links_idx.append([])
-        for link in stack_topology:
-            ordered_links_idx[n_level].append(link)
-            next_stack += dict_child[link]
-        n_level += 1
-        stack_topology = next_stack
-    ordered_links_idx = tuple(chain.from_iterable(ordered_links_idx))
+    stack_topology = [lc for lc in reversed(range(n_links)) if l_infos[lc]["parent_idx"] == -1]
+    while stack_topology:
+        link = stack_topology.pop()
+        ordered_links_idx.append(link)
+        stack_topology.extend(reversed(dict_child[link]))
+    ordered_links_idx = tuple(ordered_links_idx)
 
     if not ordered_links_idx:
         # avoid case with worldbody without any body (geom directly assigned to worldbody)
@@ -80,6 +118,8 @@ def _order_links(l_infos, j_infos, links_g_infos=None):
     for l_info in l_infos:
         if l_info["parent_idx"] >= 0:  # non-base link
             l_info["parent_idx"] = ordered_links_idx.index(l_info["parent_idx"])
+        if "root_idx" in l_info:
+            l_info["root_idx"] = ordered_links_idx.index(l_info["root_idx"])
 
     new_l_infos = [l_infos[i] for i in ordered_links_idx]
     new_j_infos = [j_infos[i] for i in ordered_links_idx]
@@ -92,9 +132,15 @@ def _order_links(l_infos, j_infos, links_g_infos=None):
 
 def parse_urdf(morph, surface):
     if isinstance(morph.file, (str, Path)):
-        path = os.path.join(get_assets_dir(), morph.file)
-        parent_dir = os.path.dirname(path)
-        robot = urdfpy.URDF.load(path)
+        # Inline XML content parses directly; a file path does not and falls back to reading from disk.
+        try:
+            node = ET.fromstring(morph.file)
+            parent_dir = os.getcwd()
+            robot = urdfpy.URDF._from_xml(node, node, parent_dir)
+        except (ET.ParseError, TypeError):
+            path = os.path.join(get_assets_dir(), morph.file)
+            parent_dir = os.path.dirname(path)
+            robot = urdfpy.URDF.load(path)
     else:
         parent_dir = os.getcwd()
         robot = morph.file
@@ -334,13 +380,15 @@ def parse_urdf(morph, surface):
         if joint.joint_type not in ("floating", "fixed") and morph.default_armature is not None:
             j_info["dofs_armature"] = np.full((j_info["n_dofs"],), morph.default_armature)
 
-        j_info["dofs_kp"] = gu.default_dofs_kp(j_info["n_dofs"])
-        j_info["dofs_kv"] = gu.default_dofs_kv(j_info["n_dofs"])
+        kp = gu.default_dofs_kp(j_info["n_dofs"])
+        kv = gu.default_dofs_kv(j_info["n_dofs"])
         if joint.safety_controller is not None:
             if joint.safety_controller.k_position is not None:
-                j_info["dofs_kp"] = np.tile(joint.safety_controller.k_position, j_info["n_dofs"])
+                kp = np.tile(joint.safety_controller.k_position, j_info["n_dofs"])
             if joint.safety_controller.k_velocity is not None:
-                j_info["dofs_kv"] = np.tile(joint.safety_controller.k_velocity, j_info["n_dofs"])
+                kv = np.tile(joint.safety_controller.k_velocity, j_info["n_dofs"])
+        j_info["dofs_act_gain"] = kp
+        j_info["dofs_act_bias"] = np.column_stack([np.zeros_like(kp), -kp, -kv])
 
         j_info["dofs_force_range"] = np.tile([-np.inf, np.inf], (j_info["n_dofs"], 1))
         if joint.limit is not None and joint.limit.effort is not None:
@@ -361,7 +409,7 @@ def parse_urdf(morph, surface):
             g_info["pos"] *= morph.scale
 
     # Re-order kinematic tree info
-    l_infos, links_j_infos, links_g_infos, _ = _order_links(l_infos, links_j_infos, links_g_infos)
+    l_infos, links_j_infos, links_g_infos, _ = order_links_depth_first(l_infos, links_j_infos, links_g_infos)
 
     eqs_info = parse_equalities(robot, morph)
 

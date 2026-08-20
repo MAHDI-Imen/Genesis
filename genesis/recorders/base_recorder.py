@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Callable, Generic, TypeVar
 
 import genesis as gs
 from genesis.options.recorders import RecorderOptions
+from genesis.utils import data_to_array
 
 if TYPE_CHECKING:
     from .recorder_manager import RecorderManager
@@ -189,7 +190,9 @@ class Recorder(Generic[T]):
             return
 
         global_time = global_step * self._manager._step_dt
-        data = self._data_func()
+        # Sanitize to CPU numpy once at the boundary: process() code never has to branch on torch vs numpy, and no
+        # GPU tensor is ever queued for cross-thread access in threaded mode.
+        data = data_to_array(self._data_func())
 
         if not self.run_in_thread:
             # non-threaded mode: process data synchronously

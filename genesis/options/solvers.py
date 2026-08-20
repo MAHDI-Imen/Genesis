@@ -365,12 +365,16 @@ class KinematicOptions(Options):
         Whether to batch link info. Automatically enabled for heterogeneous simulation. Defaults to False.
     batch_dofs_info : bool, optional
         Whether to batch DOF info. Defaults to False.
+    IK_max_targets : int, optional
+        Maximum number of IK targets. Increasing this doesn't affect IK solving speed, but will increase memory usage.
+        Defaults to 6.
     """
 
     dt: PositiveFloat | None = None
     batch_links_info: StrictBool = False
     batch_joints_info: StrictBool = False
     batch_dofs_info: StrictBool = False
+    IK_max_targets: PositiveInt = 6
 
 
 class ToolOptions(Options):
@@ -418,6 +422,16 @@ class RigidOptions(Options):
         Whether to disable all constraints. Defaults to False.
     max_collision_pairs : int, optional
         Maximum number of collision pairs. Defaults to 100.
+    max_contacts : int, optional
+        Maximum number of simultaneous contact points per environment that the constraint solver can handle, which
+        determines the size of the contact constraint buffers (3 to 10 constraint rows per contact point depending on
+        'friction_cone', 'enable_torsional_friction', and 'enable_rolling_friction'). Defaults to None.
+
+        This limit applies to the final contact points after pruning, not to the candidate contact points that
+        collision detection can emit (see 'max_collision_pairs'). Exceeding it at runtime halts the simulation with
+        an error. None resolves it automatically: the pre-pruning worst case or, when contact pruning is enabled
+        (see 'contact_pruning_tolerance'), 32 contact points per candidate link pair but no less than 512, whichever
+        is smaller.
     integrator : gs.integrator, optional
         Integrator type. Current supported integrators are 'gs.integrator.Euler', 'gs.integrator.implicitfast' and
         'gs.integrator.approximate_implicitfast'. 'Euler' and 'implicitfast' are consistent with their Mujoco
@@ -433,9 +447,12 @@ class RigidOptions(Options):
         Constraint solver type. Current supported constraint solvers are 'gs.constraint_solver.CG' (conjugate gradient)
         and 'gs.constraint_solver.Newton' (Newton's method). Defaults to 'Newton'.
     iterations : int, optional
-        Number of iterations for the constraint solver. Defaults to 50.
+        Maximum number of iterations for the constraint solver; the solve exits early once its convergence tolerance
+        is met, so this bound only binds on hard steps. Defaults to 50.
     tolerance : float, optional
-        Tolerance for the constraint solver. Defaults to 1e-6.
+        Tolerance for the constraint solver. If None, resolved based on the floating-point precision selected via
+        `gs.init(precision=...)`: 1e-5 for single precision ("32") and 1e-8 for double precision ("64"). Defaults
+        to None.
     ls_iterations : int, optional
         Number of line search iterations for the constraint solver. Defaults to 50.
     ls_tolerance : float, optional
@@ -447,8 +464,46 @@ class RigidOptions(Options):
         This option should only be enabled if necessary because it is experimental and will slow down the simulation.
     noslip_tolerance : float, optional
         Tolerance for the noslip solver. Defaults to 1e-6.
+    friction_cone : gs.friction_cone, optional
+        Contact friction cone model, trading numerical robustness for physical accuracy. 'gs.friction_cone.pyramidal'
+        (default) is robust and easy to solve; 'gs.friction_cone.elliptic' is the exact isotropic cone, harder to solve
+        but paired with a high 'impratio' it holds resting stacks without slow tangential creep. See 'gs.friction_cone'
+        for the description of each model. Unsupported with the noslip solver or differentiable simulation.
+    contact_resolution : gs.contact_resolution, optional
+        How a contact's normal force and friction force are resolved against each other.
+        'gs.contact_resolution.signorini' bounds friction against the normal force the contact has developed, so sliding
+        never inflates it and a body launched horizontally decelerates at mu * g instead of lifting off, at the cost of
+        extra solver iterations. 'gs.contact_resolution.convex' poses the contact as a single convex program, which
+        converges more predictably on stiff scenes but lets fast sliding buy normal force. See 'gs.contact_resolution'
+        for the description of each model. Defaults to None, resolving to 'signorini' with the elliptic cone and the
+        Newton solver, and 'convex' otherwise - the pyramidal cone's rows do not separate, and the conjugate gradient
+        solver does not reach the fixed point. Always 'convex' when 'enable_mujoco_compatibility' is set.
+    enable_torsional_friction : bool, optional
+        Whether contacts also resist relative spin about their normal, with strength set per geometry by the material
+        option 'friction_torsional' (see 'gs.materials.Rigid'). Enable it when spin resistance matters - a grasped
+        object twisting in a gripper, a top spinning in place - motions a point contact transmits no torque against,
+        so they persist indefinitely otherwise. The extra spin resistance slows down the constraint solve on every
+        contact, including those where spin is irrelevant. Defaults to False.
+    enable_rolling_friction : bool, optional
+        Whether contacts also resist rolling, with strength set per geometry by the material option 'friction_rolling'
+        (see 'gs.materials.Rigid'). Enable it when rolling resistance matters - a ball or wheel coasting to rest, a
+        cylinder settling on a slope - motions a point contact otherwise never slows down. The extra rolling
+        resistance slows down the constraint solve on every contact, more so than torsional friction (two extra axes),
+        and requires 'enable_torsional_friction'. Defaults to False.
+    impratio : float, optional
+        Ratio of tangential (friction) to normal constraint impedance at contacts. Raising it above 1 stiffens
+        friction so resting stacks and piles hold their pose under sustained shear, at the cost of a slower solve that
+        turns numerically unstable once pushed too far - a stiffness-versus-stability tradeoff, so use the smallest
+        value that holds the contacts. It matters mainly with the elliptic cone, which stiffens friction alone while
+        leaving the normal contact response at its own impedance. Defaults to None, resolving to 100 with the elliptic
+        cone (1 when 'enable_mujoco_compatibility' is set) and 1 otherwise.
     sparse_solve : bool, optional
-        Whether to exploit sparsity in the constraint system. Defaults to False.
+        Whether to exploit sparsity (skyline-envelope Cholesky) in the constraint solver.
+
+        Defaults to None, which resolves automatically: enabled on the CPU backend (and not under MuJoCo compatibility)
+        when the scene has block structure - at least two DOF-carrying bodies or at least two free joints - so the
+        Hessian band stays much tighter than its dimension. Never enabled on GPU, where the dense tiled factorization
+        is faster. Set True or False to override the automatic choice; True is ignored with a warning on GPU.
     contact_resolve_time : float, optional
         Please note that this option will be deprecated in a future version. Use 'constraint_timeconst'
         instead.
@@ -457,18 +512,30 @@ class RigidOptions(Options):
         constraint. This parameter is called 'timeconst' in Mujoco
         (https://mujoco.readthedocs.io/en/latest/modeling.html#solver-parameters). Defaults to 0.01.
     use_contact_island : bool, optional
-        Whether to use contact island to speed up contact resolving. Defaults to False.
+        Whether to partition the constraint solve into independent per-island blocks. It has no effect on a scene that
+        is a single dense-coupled tree (one island) or is differentiable, where the dense whole-scene solve is used
+        regardless. Defaults to True.
     use_hibernation : bool, optional
-        Whether to enable hibernation. Defaults to False.
+        Whether to put bodies that have come to rest to sleep, so the solver skips them until they are disturbed. It
+        quietly has no effect on a body that is differentiable, prunable, or under no-slip friction. Defaults to False.
     hibernation_thresh_vel : float, optional
-        Velocity threshold for hibernation. Defaults to 1e-3.
-    hibernation_thresh_acc : float, optional
-        Acceleration threshold for hibernation. Defaults to 1e-2.
+        Velocity tolerance for hibernation, in meters per second: a body sleeps once its maximum DOF speed stays below
+        this for a few consecutive steps, and a whole island sleeps once all its bodies are ready. Each rotational DOF
+        is weighted by the body's swept radius, so the tolerance is a single linear speed that applies uniformly to
+        translation and rotation. If None, it is set to 1e-4 when MuJoCo compatibility is enabled (matching MuJoCo's
+        default) and 2e-3 otherwise. Defaults to None.
     max_dynamic_constraints : int, optional
         Maximum number of dynamic constraints (like suction cup). Defaults to 8.
     use_gjk_collision: bool, optional
         Whether to use GJK for collision detection instead of MPR. More stable but much slower. Defaults to
         `sim_options.requires_grad`.
+    enable_contact_patch: bool, optional
+        Whether to recover the full contact patch from the touching faces inside GJK, in a single detection pass,
+        instead of through perturbed re-detections. The contact patch is cheaper and reports the exact contact
+        polygon, but it is discouraged: it is less reliable than the perturbation-based detection, which is extremely
+        robust at the cost of extra detection passes. Requires GJK collision detection, and raises otherwise. If
+        None, it is enabled when MuJoCo compatibility is enabled together with GJK and multi-contact, and disabled
+        otherwise. Defaults to None.
     broadphase_traversal : gs.broadphase_traversal, optional
         Broadphase traversal strategy. ``SAP`` (sweep-and-prune) or ``ALL_VS_ALL`` (parallel pair iteration). Defaults
         to ``None`` (auto: ``SAP`` on CPU or when hibernation/heterogeneous entities are enabled, ``ALL_VS_ALL`` on GPU
@@ -488,6 +555,7 @@ class RigidOptions(Options):
     enable_adjacent_collision: StrictBool = False
     disable_constraint: StrictBool = False
     max_collision_pairs: NonNegativeInt = 150
+    max_contacts: PositiveInt | None = None
     multiplier_collision_broad_phase: PositiveInt = 8
     integrator: gs.integrator = gs.integrator.approximate_implicitfast
     IK_max_targets: PositiveInt = 6
@@ -500,20 +568,25 @@ class RigidOptions(Options):
     # constraint solver
     constraint_solver: gs.constraint_solver = gs.constraint_solver.Newton
     iterations: PositiveInt = 50
-    tolerance: PositiveFloat = 1e-6
+    tolerance: PositiveFloat | None = None
     ls_iterations: PositiveInt = 50
     ls_tolerance: PositiveFloat = 1e-2
     noslip_iterations: NonNegativeInt = 0
     noslip_tolerance: PositiveFloat = 1e-6
-    sparse_solve: StrictBool = False
+    friction_cone: gs.friction_cone = gs.friction_cone.pyramidal
+    contact_resolution: gs.contact_resolution | None = None
+    enable_torsional_friction: StrictBool = False
+    enable_rolling_friction: StrictBool = False
+    impratio: PositiveFloat | None = None
+    contact_pruning_tolerance: PositiveFloat | None = 0.02
+    sparse_solve: StrictBool | None = None
     constraint_timeconst: PositiveFloat = 0.01
-    use_contact_island: StrictBool = False
+    use_contact_island: StrictBool = True
     box_box_detection: StrictBool = False
 
     # hibernation threshold
     use_hibernation: StrictBool = False
-    hibernation_thresh_vel: PositiveFloat = 1e-3
-    hibernation_thresh_acc: PositiveFloat = 1e-2
+    hibernation_thresh_vel: PositiveFloat | None = None
 
     # for dynamic properties
     max_dynamic_constraints: NonNegativeInt = 8
@@ -522,14 +595,9 @@ class RigidOptions(Options):
     enable_multi_contact: StrictBool = True
     enable_mujoco_compatibility: StrictBool = False
 
-    # Linesearch strategy selection:
-    #   * None:  perf dispatch chooses between monolith + iterative and decomposed + parallel linesearch
-    #   * False: force monolith + iterative (Newton-guided) linesearch
-    #   * True:  force decomposed + parallel (grid search) linesearch
-    prefer_parallel_linesearch: StrictBool | None = None
-
     # GJK collision detection
     use_gjk_collision: StrictBool | None = None
+    enable_contact_patch: StrictBool | None = None
 
     # broadphase configuration
     broadphase_traversal: gs.broadphase_traversal | None = None
@@ -541,8 +609,17 @@ class RigidOptions(Options):
 
     def model_post_init(self, context):
         super().model_post_init(context)
-        if self.broadphase_traversal == gs.broadphase_traversal.ALL_VS_ALL and self.use_hibernation:
-            gs.raise_exception("ALL_VS_ALL broadphase traversal does not support hibernation")
+        if self.contact_pruning_tolerance is not None and self.enable_mujoco_compatibility:
+            if "contact_pruning_tolerance" in self.model_fields_set:
+                gs.raise_exception(
+                    "'contact_pruning_tolerance' is not supported when 'enable_mujoco_compatibility' is True"
+                )
+            # User did not explicitly request pruning, silently disable to guarantee mujoco compatibility
+            self.contact_pruning_tolerance = None
+        if self.friction_cone == gs.friction_cone.elliptic and self.noslip_iterations > 0:
+            gs.raise_exception("The elliptic friction cone is not supported with the noslip solver.")
+        if self.enable_rolling_friction and not self.enable_torsional_friction:
+            gs.raise_exception("'enable_rolling_friction' requires 'enable_torsional_friction'.")
 
 
 class MPMOptions(Options):

@@ -57,8 +57,6 @@ class Simulator(RBC):
         The scene object that the simulator is associated with.
     options : gs.SimOptions
         A SimOptions object that contains all simulator-level options.
-    coupler_options : gs.CouplerOptions
-        A CouplerOptions object that contains all the options for the coupler.
     tool_options : gs.ToolOptions
         A ToolOptions object that contains all the options for the ToolSolver.
     rigid_options : gs.RigidOptions
@@ -73,13 +71,14 @@ class Simulator(RBC):
         An SFOptions object that contains all the options for the SFSolver.
     pbd_options : gs.PBDOptions
         A PBDOptions object that contains all the options for the PBDSolver.
+    coupler_options : gs.CouplerOptions
+        A CouplerOptions object that contains all the options for the coupler.
     """
 
     def __init__(
         self,
         scene: "Scene",
         options: SimOptions,
-        coupler_options: BaseCouplerOptions,
         tool_options: ToolOptions,
         rigid_options: RigidOptions,
         kinematic_options: KinematicOptions,
@@ -88,12 +87,12 @@ class Simulator(RBC):
         fem_options: FEMOptions,
         sf_options: SFOptions,
         pbd_options: PBDOptions,
+        coupler_options: BaseCouplerOptions,
     ):
         self._scene = scene
 
         # options
         self.options = options
-        self.coupler_options = coupler_options
         self.tool_options = tool_options
         self.rigid_options = rigid_options
         self.kinematic_options = kinematic_options
@@ -102,6 +101,7 @@ class Simulator(RBC):
         self.fem_options = fem_options
         self.sf_options = sf_options
         self.pbd_options = pbd_options
+        self.coupler_options = coupler_options
 
         self._dt: float = options.dt
         self._substep_dt: float = options.dt / options.substeps
@@ -414,6 +414,16 @@ class Simulator(RBC):
             f_local=self.cur_substep_local,
             solvers=self._solvers,
         )
+
+        # `SimState.__init__` calls `solver.get_state` on every solver, and solvers that maintain a per-solver queue
+        # (kinematic/rigid) push the returned state there as a within-step cache. The SimState itself is registered just
+        # below for grad collection at the simulator level, so the per-solver entry would cause `collect_output_grads`
+        # to dispatch `kernel_get_state_grad` twice on the same state and double the adjoint via atomic_add. Lift those
+        # entries here. Solvers without solver-state registration (mpm, fem, sph, pbd, sf, tool) leave their queue
+        # empty, so `discard` is a no-op for them.
+        for solver, solver_state in zip(self._solvers, state.solvers_state):
+            if solver_state is not None:
+                solver._queried_states.discard(solver_state)
 
         # store all queried states to track gradient flow
         self._queried_states.append(state)
