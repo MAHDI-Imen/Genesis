@@ -60,7 +60,7 @@ def get_local_inertial_from_geom_info(g_info: dict, rho: float = 1.0) -> Inertia
         I_z = 0.5 * geom_mass * radius**2
         geom_inertia_local = np.diag([I_r, I_r, I_z])
     elif geom_type == gs.GEOM_TYPE.ELLIPTIC_CYLINDER:
-        a, b, height = geom.data[:3]  # semi-axes a,b and height along z
+        a, b, height = g_info["data"][:3]  # semi-axes a,b and height along z
         geom_mass = np.pi * a * b * height * rho  # volume = π*a*b*h
         I_x = (geom_mass / 12.0) * (height**2 + b**2)
         I_y = (geom_mass / 12.0) * (height**2 + a**2)
